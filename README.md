@@ -1,0 +1,1 @@
+# narrow_noc_path
