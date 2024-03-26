@@ -42,8 +42,8 @@ path_to <- edu_noc|>
   arrange(desc(value))|>
   mutate(value=round(value,3))|>
   separate(Education, into = c("in this field of study","attained this level"), sep=": ")|>
-  select(`In this occupation`=NOC,
-         `this proportion of workers`=value,
+  select(`For workers in this occupation`=NOC,
+         `this proportion`=value,
          `attained this level`,
           `in this field of study`)
 
@@ -55,9 +55,35 @@ path_from <- edu_noc|>
   slice_max(value, n=1)|>
   arrange(desc(value))|>
   mutate(value=round(value,3))|>
-  separate(Education, into = c("in this field of study","For those who attained"), sep=": ")|>
-  select(`For those who attained`,
+  separate(Education, into = c("in this field of study","For students who attained"), sep=": ")|>
+  select(`For students who attained`,
          `in this field of study`,
          `this proportion`=value,
          `ended up in this occupation`=NOC)
+
+## Create a new workbook
+wb <- createWorkbook()
+
+hs <- createStyle(
+  textDecoration = "BOLD", fontColour = "#FFFFFF", fontSize = 15,
+  fontName = "Arial Narrow", fgFill = "#4F80BD"
+)
+
+## Add a worksheet
+addWorksheet(wb, "Paths to Occupation")
+addWorksheet(wb, "Paths from Education")
+
+writeData(wb, sheet = "Paths to Occupation", x = path_to, headerStyle = hs, withFilter = TRUE)
+writeData(wb, sheet = "Paths from Education", x = path_from, headerStyle = hs, withFilter = TRUE)
+
+## set col widths
+setColWidths(wb, "Paths to Occupation", cols = 1:4, widths = c(70,15,55,70))
+setColWidths(wb, "Paths from Education", cols = 1:4, widths = c(55,70,15,70))
+
+## Save workbook
+
+saveWorkbook(wb, here("out", "top_paths_to_and_from.xlsx"), overwrite = TRUE)
+
+
+
 
