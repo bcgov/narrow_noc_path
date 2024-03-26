@@ -2,7 +2,7 @@ library(tidyverse)
 library(here)
 library(vroom)
 library(janitor)
-library(corrr)
+library(openxlsx)
 
 #constants
 margin_greater_than <- 1000 #only keep rows and columns that sum to more than this
@@ -35,7 +35,7 @@ edu_noc <- edu_noc[edu_noc$Total>margin_greater_than, keep_columns]|>
 #write to disk------------------------------
 write_csv(edu_noc, here("out","edu_noc.csv"))
 
-the_most_common_path <- edu_noc|>
+path_to <- edu_noc|>
   group_by(NOC)|>
   mutate(value=value/sum(value))|>
   slice_max(value, n=1)|>
@@ -43,10 +43,21 @@ the_most_common_path <- edu_noc|>
   mutate(value=round(value,3))|>
   separate(Education, into = c("in this field of study","attained this level"), sep=": ")|>
   select(`In this occupation`=NOC,
-         `this percentage of workers`=value,
+         `this proportion of workers`=value,
          `attained this level`,
           `in this field of study`)
 
-write_csv(the_most_common_path, here("out", "the_most_common_path.csv"))
+#do same by Education
 
+path_from <- edu_noc|>
+  group_by(Education)|>
+  mutate(value=value/sum(value))|>
+  slice_max(value, n=1)|>
+  arrange(desc(value))|>
+  mutate(value=round(value,3))|>
+  separate(Education, into = c("in this field of study","For those who attained"), sep=": ")|>
+  select(`For those who attained`,
+         `in this field of study`,
+         `this proportion`=value,
+         `ended up in this occupation`=NOC)
 
