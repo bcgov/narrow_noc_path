@@ -1,0 +1,108 @@
+---
+title: "Salary by Highest attainment and Field of Study"
+format:
+  html:
+    page-layout: full
+    code-fold: true
+    code-summary: "Show the code"
+---
+
+```{r, include=FALSE, message=FALSE}
+library(tidyverse)
+library(here)
+library(vroom)
+library(janitor)
+library(readxl)
+library(Hmisc)
+```
+
+
+```{r, message=FALSE}
+salary_plot <- function(tbbl, Highest){
+  plt <- tbbl%>%
+    ggplot(aes(x = weighted_mean, 
+               y = fct_reorder(CIP, weighted_mean),
+               text= paste0("Field of Study: ",
+                            CIP,
+                            "\n Weighted average median salary = ",
+                            scales::dollar(weighted_mean),
+                            "\n Weighted standard deviation median salary = ",
+                            scales::dollar(weighted_sd)
+               )
+    )) +
+    geom_point() +
+    geom_errorbar(aes(xmin = lower, xmax = upper), colour="grey")+
+    theme_minimal()+
+    theme(axis.text.y = element_blank())+
+    scale_x_continuous(labels=scales::dollar)+
+    labs(x="Weighted average median salary",
+         y="Field of Study",
+         title=paste("Weighted average median salary, +/- one standard deviation for", Highest))
+  
+  plotly::ggplotly(plt, tooltip="text")
+}
+
+#get data------------------------------
+edu_noc <- vroom(here("out","edu_noc.csv"))|>
+  mutate(NOC_Description=str_sub(NOC, start=7),
+         NOC=str_sub(NOC, 1,5))
+
+median_salary <- read_excel(here("data","median_salary.xlsx"))|>
+  select(NOC, median_salary=contains("calculated"))
+
+joined <- left_join(edu_noc, median_salary)|>
+  group_by(Education)|>
+  summarise(weighted_mean=weighted.mean(median_salary, w=value, na.rm=TRUE),
+            weighted_sd=sqrt(Hmisc::wtd.var(median_salary, weights=value)),
+            lower=weighted_mean-weighted_sd,
+            upper=weighted_mean+weighted_sd
+            )|>
+  separate(Education, into = c("CIP", "Highest"), sep=": ")|>
+  group_by(Highest)|>
+  nest()|>
+  mutate(salary_plot=map2(data, Highest, salary_plot))
+
+write_rds(joined, here("out","joined.rds"))
+
+```
+
+Here we join the LMO median salary data to the CIP-NOC table (98-10-0403-01), and calculate the weighted average and standard deviation of the median salary: i.e. for a given education, use the NOC counts as weights when calculating the mean and standard deviation. 
+
+Then for each level of highest attainment, we plot the weighted average median salary, and error bars for +/- one standard deviation (to indicate dispersion).
+
+
+
+```{r, fig.height=9, fig.retina=2}
+joined$salary_plot[[1]]
+```
+
+```{r, fig.height=9, fig.retina=2}
+joined$salary_plot[[2]]
+```
+
+```{r, fig.height=9, fig.retina=2}
+joined$salary_plot[[3]]
+```
+
+```{r, fig.height=9, fig.retina=2}
+joined$salary_plot[[4]]
+```
+
+```{r, fig.height=9, fig.retina=2}
+joined$salary_plot[[5]]
+```
+
+```{r, fig.height=9, fig.retina=2}
+joined$salary_plot[[6]]
+```
+
+```{r, fig.height=9, fig.retina=2}
+joined$salary_plot[[7]]
+```
+
+```{r, fig.height=9, fig.retina=2}
+joined$salary_plot[[8]]
+```
+
+
+
