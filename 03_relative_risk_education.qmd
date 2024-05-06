@@ -1,0 +1,193 @@
+---
+title: "Relative Risk associated with Education"
+author: "Richard Martin"
+format:
+  html:
+    page-layout: full
+    code-fold: true
+    code-summary: "Show the code"
+---
+```{r, include=FALSE}
+library(tidyverse)
+library(here)
+library(readxl)
+library(plotly)
+library(conflicted)
+conflicts_prefer(dplyr::filter)
+bad_occ <- read_csv(here("out","bad_occ.csv"))
+relative_risk <- read_csv(here("out","relative_risk.csv"))
+cut_off=.2
+my_dt <- function(tbbl, length) {
+  DT::datatable(tbbl,
+    extensions = "Buttons",
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(className = "dt-center", targets = "_all")),
+      paging = TRUE,
+      scrollX = TRUE,
+      scrollY = TRUE,
+      searching = TRUE,
+      ordering = TRUE,
+      dom = "Btip",
+      buttons = list(
+        list(extend = "csv", filename = "some_file_name"),
+        list(extend = "excel", filename = "some_file_name")
+      ),
+      pageLength = length
+    )
+  )
+}
+```
+
+```{r, eval=FALSE}
+#constants------------
+cut_off=.2
+#functions---------------
+my_dt <- function(tbbl, length) {
+  DT::datatable(tbbl,
+    extensions = "Buttons",
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(className = "dt-center", targets = "_all")),
+      paging = TRUE,
+      scrollX = TRUE,
+      scrollY = TRUE,
+      searching = TRUE,
+      ordering = TRUE,
+      dom = "Btip",
+      buttons = list(
+        list(extend = "csv", filename = "some_file_name"),
+        list(extend = "excel", filename = "some_file_name")
+      ),
+      pageLength = length
+    )
+  )
+}
+get_relative_risk <- function(edu, tbbl){
+  prob_bad_conditional_on_education <- tbbl|>
+    filter(Education==edu)|>
+    group_by(occ_type)|>
+    summarize(value=sum(value))|>
+    ungroup()|>
+    mutate(value=value/sum(value))|>
+    filter(occ_type=="bad")|>
+    pull(value)
+
+  prob_bad_conditional_on_not_education <- tbbl|>
+    filter(Education!=edu)|>
+    group_by(occ_type)|>
+    summarize(value=sum(value))|>
+    ungroup()|>
+    mutate(value=value/sum(value))|>
+    filter(occ_type=="bad")|>
+    pull(value)
+
+  relative_risk <- prob_bad_conditional_on_education/prob_bad_conditional_on_not_education
+}
+#the code--------------------
+cip_noc_all <- read_csv(here("out","cip_noc_all_ages_processed.csv"))|>
+  rename(NOCtemp=NOC)|>
+  mutate(NOC=str_sub(NOCtemp, 1,5),
+         Description=str_sub(NOCtemp, 7), .before=everything())|>
+  select(-NOCtemp)
+
+median_salaries <- read_excel(here("data","median_salary.xlsx"))|>
+  select(NOC, median_salary=contains("calculated"))
+
+paths <- read_excel(here("out","top_paths_to_and_from.xlsx"), sheet = "Paths from Education all ages")|>
+  select(highest=`For students who attained`,CIP=`in this field of study`, paths=`# of educations with share > 1%`)|>
+  distinct()
+
+skills <- read_excel(here("data", "skills_original.xlsx"))|>
+  mutate(NOC=str_pad(noc2021, 5, "left", "0"), .before=everything())|>
+  select(-noc2021)|>
+  group_by(NOC)|>
+  summarize(average_skill=round(mean(value_mean),2))
+
+low_median_salary <- median_salaries|>
+  slice_min(median_salary, prop = cut_off)
+
+low_skills <- skills|>
+  slice_min(average_skill, prop = cut_off)
+
+bad_occ <- inner_join(low_median_salary, low_skills)|>
+  mutate(occ_type="bad")|>
+  select(NOC, occ_type)
+
+joined <- full_join(cip_noc_all, bad_occ)|>
+  mutate(occ_type=if_else(is.na(occ_type), "good",  occ_type))
+
+nested <- tibble(Education=unique(joined$Education), data=list(joined))|>
+  na.omit()|>
+  mutate(relative_risk=map2_dbl(Education, data, get_relative_risk))
+
+relative_risk <- nested|>
+  select(Education, relative_risk)|>
+  separate(Education, into=c("CIP","highest"), sep=": ")
+```
+
+## Introduction
+
+One important use of the British Columbia Labour Market Outlook is to encourage prospective students to choose fields of study that have a clear/narrow path to high opportunity occupations. Consider optometry, where 91% of people with a degree in optometry work as optometrists. For such narrow paths the LMO can provide *positive* guidance regarding field of study.
+
+However there are many occupations that do not have such a clear linkage with education, which makes education a risky investment. Most people are risk averse^[at least for large gambles, like education], and are willing to sacrifice some expected return in exchange for greater certainty in outcomes.  Here we focus on the relative risk of ending up in a low skill low salary occupation.
+
+We define "bad" occupations to be those that have a median salary in the bottom `r scales::percent(cut_off)`, and an average ONET skill score in the bottom `r scales::percent(cut_off)`, resulting in `r nrow(bad_occ)` "bad" occupations. 
+
+## The "bad" occupations
+
+```{r}
+bad_occ|>
+  select(-occ_type)|>
+  select(NOC, Description, everything())|>
+  my_dt(length=-1)
+```
+
+
+## Description of Relative Risk
+
+The relative risk of a given education is defined as:
+
+$$ \frac{prob[bad~occupation~|~this~education]}{prob[bad~occupation~|~all~other~educations]}$$
+Note that a relative risk greater/less than 1 indicates that for this field of study you are more/less likely to end up in a "bad" occupation, relative to all other occupations.  If relative risk was exactly 1 then you would be no more or less likely than with any other field of study. 
+
+## The relative risk of ending up in a low salary low skill occupation, by education
+
+```{r, fig.retina=2, fig.height=10, warning=FALSE}
+plt <- ggplot(relative_risk, aes(relative_risk, 
+                          tidytext::reorder_within(CIP,relative_risk,highest), 
+                          text=paste0(
+                            "Field of Study: ",
+                            CIP, 
+                            "\n Relative Risk of low-salary low skill occupation = ",
+                            round(relative_risk,2)
+                            )))+
+  geom_vline(xintercept = 1, colour="grey60")+
+  geom_point(alpha=.2)+
+  tidytext::scale_y_reordered()+
+  scale_x_continuous(trans="log10")+
+  facet_wrap(~highest, scales = "free_y")+
+  labs(x="Relative Risk",
+       y=NULL)+
+  theme(axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank()) 
+
+ggplotly(plt, tooltip = "text")|>
+  config(displayModeBar = FALSE)
+```
+
+## The relative risk data:
+
+```{r}
+relative_risk|>
+  mutate(relative_risk=round(relative_risk, 2))|>
+my_dt(length=10)
+```
+
+
+
+## Conclusion
+
+The LMO *encourages* prospective students to follow educational paths that lead clearly/narrowly to high opportunity occupations.  In contrast, here we are *warning* prospective students about fields of study with a higher risk of ending up in "bad" occupations. This information is critically important to risk averse individuals.
+
+Note that these education investment decisions are also important from a social perspective: as a society we are better off if we can curtail low or negative return education investments.
