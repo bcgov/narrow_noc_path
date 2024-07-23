@@ -33,7 +33,7 @@ process_data <- function(file){
     filter(Education!="Total")|>
     pivot_longer(cols=-Education, names_to = "NOC", values_to = "value")
   #write to disk------------------------------
-  write_csv(edu_noc, here("out",paste(file,"_processed.csv")))
+  write_csv(edu_noc, here("out", file))
   return(edu_noc)
 }
 path_to <- function(tbbl){
