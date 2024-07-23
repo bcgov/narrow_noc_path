@@ -5,6 +5,7 @@ format:
   html:
     page-layout: full
     code-fold: true
+    self-contained: true
     code-summary: "Show the code"
 ---
 ```{r, include=FALSE}
@@ -14,12 +15,14 @@ library(readxl)
 library(plotly)
 library(conflicted)
 conflicts_prefer(dplyr::filter)
-bad_occ <- read_csv(here("out","bad_occ.csv"))
+lsls_occ <- read_csv(here("out","lsls_occ.csv"))
 relative_risk <- read_csv(here("out","relative_risk.csv"))
+joined2 <- read_csv(here("out","joined2.csv"))
 cut_off=.2
 my_dt <- function(tbbl, length) {
   DT::datatable(tbbl,
     extensions = "Buttons",
+    filter = "top",
     rownames = FALSE,
     options = list(
       columnDefs = list(list(className = "dt-center", targets = "_all")),
@@ -37,52 +40,76 @@ my_dt <- function(tbbl, length) {
     )
   )
 }
+
+all_risks <- function(cip, tbbl){
+  plt <- tbbl|>
+    mutate(rank=rank(relative_risk))|>
+    ggplot(aes(relative_risk, 
+               fct_reorder(CIP, relative_risk),
+               text=paste0(
+                 "For ",
+                 CIP,
+                 " the relative risk of LSLS is ",
+                 round(relative_risk, 3)
+                 )
+               )
+           )+
+    geom_vline(xintercept=1)+
+    geom_point()+
+    labs(x="Relative risk",
+         y=NULL
+         )+
+    theme_minimal()+
+    theme(axis.text.y = element_blank())
+  plotly::ggplotly(plt, tooltip = "text")
+}
+
+highest_lowest <- function(cip, tbbl){
+  tbbl|>
+    mutate(rank=rank(relative_risk))|>
+    filter(rank<=20 | rank > max(rank)-20)|>
+    ggplot(aes(relative_risk, fct_reorder(CIP, relative_risk)))+
+    geom_vline(xintercept=1)+
+    geom_point()+
+    labs(x="Relative risk",
+         y=NULL,
+         title="The lowest and highest relative risks for",
+         subtitle=cip
+    )+
+    theme_minimal()
+}
+nested <- relative_risk|>
+  group_by(highest)|>
+  nest()|>
+  mutate(plot=map2(highest, data, highest_lowest),
+         plot2=map2(highest, data, all_risks)
+         )
 ```
 
 ```{r, eval=FALSE}
 #constants------------
 cut_off=.2
 #functions---------------
-my_dt <- function(tbbl, length) {
-  DT::datatable(tbbl,
-    extensions = "Buttons",
-    rownames = FALSE,
-    options = list(
-      columnDefs = list(list(className = "dt-center", targets = "_all")),
-      paging = TRUE,
-      scrollX = TRUE,
-      scrollY = TRUE,
-      searching = TRUE,
-      ordering = TRUE,
-      dom = "Btip",
-      buttons = list(
-        list(extend = "csv", filename = "some_file_name"),
-        list(extend = "excel", filename = "some_file_name")
-      ),
-      pageLength = length
-    )
-  )
-}
 get_relative_risk <- function(edu, tbbl){
-  prob_bad_conditional_on_education <- tbbl|>
+  prob_lsls_conditional_on_education <- tbbl|>
     filter(Education==edu)|>
     group_by(occ_type)|>
     summarize(value=sum(value))|>
     ungroup()|>
     mutate(value=value/sum(value))|>
-    filter(occ_type=="bad")|>
+    filter(occ_type=="LSLS")|>
     pull(value)
 
-  prob_bad_conditional_on_not_education <- tbbl|>
+  prob_lsls_conditional_on_not_education <- tbbl|>
     filter(Education!=edu)|>
     group_by(occ_type)|>
     summarize(value=sum(value))|>
     ungroup()|>
     mutate(value=value/sum(value))|>
-    filter(occ_type=="bad")|>
+    filter(occ_type=="LSLS")|>
     pull(value)
 
-  relative_risk <- prob_bad_conditional_on_education/prob_bad_conditional_on_not_education
+  relative_risk <- prob_lsls_conditional_on_education/prob_lsls_conditional_on_not_education
 }
 #the code--------------------
 cip_noc_all <- read_csv(here("out","cip_noc_all_ages_processed.csv"))|>
@@ -93,10 +120,6 @@ cip_noc_all <- read_csv(here("out","cip_noc_all_ages_processed.csv"))|>
 
 median_salaries <- read_excel(here("data","median_salary.xlsx"))|>
   select(NOC, median_salary=contains("calculated"))
-
-paths <- read_excel(here("out","top_paths_to_and_from.xlsx"), sheet = "Paths from Education all ages")|>
-  select(highest=`For students who attained`,CIP=`in this field of study`, paths=`# of educations with share > 1%`)|>
-  distinct()
 
 skills <- read_excel(here("data", "skills_original.xlsx"))|>
   mutate(NOC=str_pad(noc2021, 5, "left", "0"), .before=everything())|>
@@ -110,11 +133,11 @@ low_median_salary <- median_salaries|>
 low_skills <- skills|>
   slice_min(average_skill, prop = cut_off)
 
-bad_occ <- inner_join(low_median_salary, low_skills)|>
-  mutate(occ_type="bad")|>
+lsls_occ <- inner_join(low_median_salary, low_skills)|>
+  mutate(occ_type="LSLS")|>
   select(NOC, occ_type)
 
-joined <- full_join(cip_noc_all, bad_occ)|>
+joined <- full_join(cip_noc_all, lsls_occ)|>
   mutate(occ_type=if_else(is.na(occ_type), "good",  occ_type))
 
 nested <- tibble(Education=unique(joined$Education), data=list(joined))|>
@@ -124,20 +147,21 @@ nested <- tibble(Education=unique(joined$Education), data=list(joined))|>
 relative_risk <- nested|>
   select(Education, relative_risk)|>
   separate(Education, into=c("CIP","highest"), sep=": ")
+
 ```
 
 ## Introduction
 
 One important use of the British Columbia Labour Market Outlook is to encourage prospective students to choose fields of study that have a clear/narrow path to high opportunity occupations. Consider optometry, where 91% of people with a degree in optometry work as optometrists. For such narrow paths the LMO can provide *positive* guidance regarding field of study.
 
-However there are many occupations that do not have such a clear linkage with education, which makes education a risky investment. Most people are risk averse^[at least for large gambles, like education], and are willing to sacrifice some expected return in exchange for greater certainty in outcomes.  Here we focus on the relative risk of ending up in a low skill low salary occupation.
+However there are many occupations that do not have such a clear linkage with education, which makes education a risky investment. Most people are risk averse^[at least for large gambles, like education], and are willing to sacrifice some expected return in exchange for greater certainty in outcomes.  Here we focus on the relative risk of ending up in a low-skill, low-salary (LSLS) occupation.
 
-We define "bad" occupations to be those that have a median salary in the bottom `r scales::percent(cut_off)`, and an average ONET skill score in the bottom `r scales::percent(cut_off)`, resulting in `r nrow(bad_occ)` "bad" occupations. 
+We define LSLS occupations to be those that have a median salary in the bottom `r scales::percent(cut_off)`, and an average ONET skill score in the bottom `r scales::percent(cut_off)`, resulting in `r nrow(lsls_occ)` LSLS occupations. 
 
-## The "bad" occupations
+## The LSLS occupations
 
 ```{r}
-bad_occ|>
+lsls_occ|>
   select(-occ_type)|>
   select(NOC, Description, everything())|>
   my_dt(length=-1)
@@ -148,34 +172,154 @@ bad_occ|>
 
 The relative risk of a given education is defined as:
 
-$$ \frac{prob[bad~occupation~|~this~education]}{prob[bad~occupation~|~all~other~educations]}$$
-Note that a relative risk greater/less than 1 indicates that for this field of study you are more/less likely to end up in a "bad" occupation, relative to all other occupations.  If relative risk was exactly 1 then you would be no more or less likely than with any other field of study. 
+$$ \frac{prob[LSLS~occupation~|~this~education]}{prob[LSLS~occupation~|~all~other~educations]}$$
+Note that a relative risk greater/less than 1 indicates that for this choice of education you are more/less likely to end up in a LSLS occupation, relative to all other occupations.  If relative risk was exactly 1 then you would be no more or less likely than with any other choice of education. 
 
-## The relative risk of ending up in a low salary low skill occupation, by education
+# All the relative risks of ending up in a low salary low skill occupation, by education
 
-```{r, fig.retina=2, fig.height=10, warning=FALSE}
-plt <- ggplot(relative_risk, aes(relative_risk, 
-                          tidytext::reorder_within(CIP,relative_risk,highest), 
-                          text=paste0(
-                            "Field of Study: ",
-                            CIP, 
-                            "\n Relative Risk of low-salary low skill occupation = ",
-                            round(relative_risk,2)
-                            )))+
-  geom_vline(xintercept = 1, colour="grey60")+
-  geom_point(alpha=.2)+
-  tidytext::scale_y_reordered()+
-  scale_x_continuous(trans="log10")+
-  facet_wrap(~highest, scales = "free_y")+
-  labs(x="Relative Risk",
-       y=NULL)+
-  theme(axis.text.y=element_blank(), 
-        axis.ticks.y=element_blank()) 
+## `r nested[[1]][[1]]`
 
-ggplotly(plt, tooltip = "text")|>
-  config(displayModeBar = FALSE)
+```{r, fig.height=7.5, fig.width=10}
+nested[[4]][[1]]
 ```
 
+## `r nested[[1]][[2]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[4]][[2]]
+```
+
+
+## `r nested[[1]][[3]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[4]][[3]]
+```
+
+## `r nested[[1]][[4]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[4]][[4]]
+```
+
+## `r nested[[1]][[5]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[4]][[5]]
+```
+
+## `r nested[[1]][[6]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[4]][[6]]
+```
+
+
+## `r nested[[1]][[7]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[4]][[7]]
+```
+
+## `r nested[[1]][[8]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[4]][[8]]
+```
+
+
+
+
+# Top and bottom 20 fields of study
+
+## `r nested[[1]][[1]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[3]][[1]]
+```
+
+## `r nested[[1]][[2]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[3]][[2]]
+```
+
+
+## `r nested[[1]][[3]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[3]][[3]]
+```
+
+## `r nested[[1]][[4]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[3]][[4]]
+```
+
+## `r nested[[1]][[5]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[3]][[5]]
+```
+
+## `r nested[[1]][[6]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[3]][[6]]
+```
+
+
+## `r nested[[1]][[7]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[3]][[7]]
+```
+
+## `r nested[[1]][[8]]`
+
+```{r, fig.height=7.5, fig.width=10}
+nested[[3]][[8]]
+```
+
+## Risk of LSLS occupation by highest attainment
+
+For fields of study that have 6 or more levels of highest attainment, the risk of LSLS occupation decreasing in highest attainment.
+
+```{r, fig.retina=2, fig.height=7.5, fig.width=10}
+lots_levels <- relative_risk|>
+  mutate(highest=factor(highest, ordered = TRUE,
+         levels = c("Apprenticeship or trades certificate or diploma",
+                    "College, CEGEP or other non-university certificate or diploma 4",
+                    "University certificate or diploma below bachelor level",
+                    "Bachelor's degree",
+                    "University certificate or diploma above bachelor level",
+                    "Master's degree",
+                    "Earned doctorate 5")))|>
+  group_by(CIP)|>
+  mutate(num_highest=n())|>
+  filter(num_highest>5)
+
+plt <- ggplot(lots_levels, aes(relative_risk, 
+                        fct_reorder(CIP, relative_risk, sum), 
+                        colour=highest, 
+                        text=CIP))+
+  geom_vline(xintercept = 1)+
+  scale_x_continuous(trans=scales::pseudo_log_trans(base = 10))+
+  geom_point(size=2)+
+  scale_color_viridis_d()+
+  theme_minimal()+
+  labs(x="Relative Risk of LSLS occupation",
+       y=NULL,
+       colour=NULL
+       )+
+  theme(legend.position="bottom")+
+  guides(colour=guide_legend(nrow=4,byrow=TRUE))
+ 
+
+plt
+#ggplotly(plt, tooltip = "text")
+```
 ## The relative risk data:
 
 ```{r}
@@ -184,10 +328,48 @@ relative_risk|>
 my_dt(length=10)
 ```
 
+## Sociology and anthropology	vs. Computer and information sciences and support services, other
+
+One might be surprised that Sociology and anthropology made it into the lowest risk Bachelor's degrees, when Computer and information sciences and support services, other were in the highest risk group.  Lets take a closer look:
+
+```{r}
+plt <- ggplot(joined2, aes(average_skill, 
+                           median_salary, 
+                           size = value, 
+                           colour=Education, 
+                           text=paste0(
+                             "In 2021 there were ",
+                             value,
+                             " people working as \n",
+                             Description,
+                             " with education \n",
+                             Education)))+
+  geom_hline(yintercept = max(lsls_occ$median_salary))+
+  geom_vline(xintercept = max(lsls_occ$average_skill))+
+  geom_point(alpha=.5)+
+  scale_y_continuous(labels = scales::dollar)+
+  labs(x="Average Skill",
+       y="Median Wage",
+       size=NULL,
+       colour=NULL)
+
+ggplotly(plt, tooltip = "text")
+```
+
+With relative risk, most of the differences are due to differences in the numerator: $prob[LSLS~|~this~education]$, as the denominator is (roughly) constant at $prob[LSLS~|~all~other~educations]~\approx~.1$. In the above plot, the LSLS occupations are in the southwest quadrant. Visual inspection clearly indicates that there are far fewer LSLS for Sociology and Anthropology than for Computer and information sciences and support services, other.  However, there are also fewer in the other 3 quadrants so we probably need to look at the numbers:
+
+```{r, message=FALSE}
+joined2|>
+  group_by(Education, occ_type)|>
+  summarize(value=sum(value))|>
+  group_by(Education)|>
+  mutate(prob=round(value/sum(value),3))|>
+  DT::datatable()
+```
 
 
 ## Conclusion
 
-The LMO *encourages* prospective students to follow educational paths that lead clearly/narrowly to high opportunity occupations.  In contrast, here we are *warning* prospective students about fields of study with a higher risk of ending up in "bad" occupations. This information is critically important to risk averse individuals.
+The LMO *encourages* prospective students to follow educational paths that lead clearly/narrowly to high opportunity occupations.  In contrast, here we are *warning* prospective students about fields of study with a higher risk of ending up in LSLS occupations. This information is critically important to risk averse individuals.
 
 Note that these education investment decisions are also important from a social perspective: as a society we are better off if we can curtail low or negative return education investments.
