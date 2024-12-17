@@ -44,7 +44,7 @@ path_to <- function(tbbl){
     mutate(greater_than_one=n())|>
     slice_max(value, n=5, with_ties = FALSE)|>
     mutate(value=round(value, 3))|>
-    arrange(desc(greater_than_one), NOC,  desc(value))|>
+    arrange(NOC)|>
     separate(Education, into = c("in this field of study","attained this level"), sep=": ")|>
     select(`For workers in this occupation`=NOC,
            `this proportion`=value,
@@ -60,7 +60,7 @@ path_from <- function(tbbl){
     mutate(greater_than_one=n())|>
     slice_max(value, n=5, with_ties = FALSE)|>
     mutate(value=round(value, 3))|>
-    arrange(desc(greater_than_one), Education, desc(value))|>
+    arrange(Education)|>
     separate(Education, into = c("in this field of study","For students who attained"), sep=": ")|>
     select(`For students who attained`,
            `in this field of study`,
